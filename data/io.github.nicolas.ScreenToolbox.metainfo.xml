@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.nicolas.ScreenToolbox</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>Screen Toolbox</name>
+  <summary>Prints com anotações e gravação de tela com teclas e cliques</summary>
+  <description>
+    <p>Tudo em um só aplicativo:</p>
+    <ul>
+      <li>Captura de área (arraste e solte para abrir o editor)</li>
+      <li>Editor: caneta, marca-texto, setas, formas, texto, marcadores numerados, desfoque, pixelização e recorte</li>
+      <li>Gravação da tela inteira com microfone e áudio do sistema opcionais</li>
+      <li>Teclas pressionadas e cliques do mouse exibidos no vídeo</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.nicolas.ScreenToolbox.desktop</launchable>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-10-26"/>
+  </releases>
+</component>

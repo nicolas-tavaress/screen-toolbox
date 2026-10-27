@@ -1,0 +1,22 @@
+app-id: io.github.nicolas.ScreenToolbox
+runtime: org.gnome.Platform
+runtime-version: '49'
+sdk: org.gnome.Sdk
+command: screen-toolbox
+finish-args:
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  - --device=all            # /dev/input (teclas/cliques) e aceleração de vídeo
+  - --socket=pulseaudio     # microfone e áudio do sistema
+  - --filesystem=xdg-pictures
+  - --filesystem=xdg-videos
+  - --talk-name=org.freedesktop.portal.Desktop
+modules:
+  - name: screen-toolbox
+    buildsystem: simple
+    build-commands:
+      - make install PREFIX=/app
+    sources:
+      - type: dir
+        path: ../..
