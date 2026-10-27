@@ -1,0 +1,15 @@
+Package: screen-toolbox
+Version: 0.1.0
+Section: graphics
+Priority: optional
+Architecture: all
+Maintainer: Nicolas <nicolastavaress.dev@gmail.com>
+Depends: python3 (>= 3.10), python3-gi, python3-gi-cairo, python3-cairo,
+ gir1.2-gtk-4.0 (>= 4.10), gir1.2-adw-1 (>= 1.5), gir1.2-gstreamer-1.0, gir1.2-pango-1.0,
+ gstreamer1.0-pipewire, gstreamer1.0-plugins-base, gstreamer1.0-plugins-good,
+ gstreamer1.0-pulseaudio, xdg-desktop-portal
+Recommends: gstreamer1.0-plugins-ugly, gstreamer1.0-libav, gstreamer1.0-plugins-bad
+Description: Prints com anotações e gravação de tela com teclas e cliques
+ Captura área ou tela inteira, edita com caneta, setas, formas, texto,
+ desfoque e pixelização, e grava a tela com áudio opcional exibindo as
+ teclas pressionadas e os cliques do mouse no vídeo.

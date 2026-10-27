@@ -1,0 +1,21 @@
+[Desktop Entry]
+Type=Application
+Name=Screen Toolbox
+GenericName=Captura e gravação de tela
+Comment=Prints com anotações e gravação de tela mostrando teclas e cliques
+Exec=screen-toolbox
+Icon=io.github.nicolas.ScreenToolbox
+Terminal=false
+Categories=Utility;Graphics;AudioVideo;Recorder;
+Keywords=screenshot;print;screen;record;screencast;annotate;keys;captura;gravar;
+StartupNotify=true
+DBusActivatable=false
+Actions=screenshot;record;
+
+[Desktop Action screenshot]
+Name=Capturar área
+Exec=screen-toolbox --screenshot
+
+[Desktop Action record]
+Name=Gravar tela inteira (iniciar/parar)
+Exec=screen-toolbox --record

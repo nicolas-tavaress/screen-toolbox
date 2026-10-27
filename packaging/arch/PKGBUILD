@@ -1,0 +1,23 @@
+# Maintainer: Nicolas <nicolastavaress.dev@gmail.com>
+pkgname=screen-toolbox
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Prints com anotações e gravação de tela com teclas e cliques"
+arch=('any')
+url="https://github.com/nicolas/screen-toolbox"
+license=('GPL-3.0-or-later')
+depends=('python' 'python-gobject' 'python-cairo' 'gtk4' 'libadwaita'
+         'gstreamer' 'gst-plugins-base' 'gst-plugins-good' 'gst-plugin-pipewire'
+         'xdg-desktop-portal')
+optdepends=('gst-plugins-ugly: gravação em MP4/H.264 (x264)'
+            'gst-libav: áudio AAC no MP4'
+            'gst-plugins-bad: h264parse')
+makedepends=('make')
+# Para construir a partir deste repositório local: makepkg com SRCDEST apontando para o tarball
+source=("$pkgname-$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+package() {
+    cd "$srcdir/$pkgname-$pkgver"
+    make install DESTDIR="$pkgdir" PREFIX=/usr
+}

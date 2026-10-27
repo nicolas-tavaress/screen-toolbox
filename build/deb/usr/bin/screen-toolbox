@@ -1,0 +1,11 @@
+#!/bin/sh
+# Inicia o Screen Toolbox a partir do código-fonte ou da instalação.
+HERE="$(dirname "$(readlink -f "$0")")"
+for dir in "$HERE/.." "$HERE/../share/screen-toolbox"; do
+    if [ -f "$dir/screen_toolbox/__main__.py" ]; then
+        PYTHONPATH="$(readlink -f "$dir")${PYTHONPATH:+:$PYTHONPATH}"
+        export PYTHONPATH
+        break
+    fi
+done
+exec python3 -m screen_toolbox "$@"
