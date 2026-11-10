@@ -132,3 +132,11 @@ make deb                              # gera build/screen-toolbox_0.1.0_all.deb
 # Fedora: packaging/rpm/screen-toolbox.spec   Arch: packaging/arch/PKGBUILD
 # Flatpak: flatpak-builder build packaging/flatpak/io.github.nicolas.ScreenToolbox.yml
 ```
+
+Para instalar o `.deb` **com as dependências**, use o `apt` (o `./` é obrigatório):
+
+```sh
+sudo apt install ./build/screen-toolbox_0.1.0_all.deb
+```
+
+O `dpkg -i` não baixa dependências: se usou ele, complete com `sudo apt -f install`.

@@ -44,6 +44,7 @@ deb:
 	install -d build/deb/DEBIAN
 	sed 's/@VERSION@/$(VERSION)/' packaging/debian/control > build/deb/DEBIAN/control
 	dpkg-deb --root-owner-group --build build/deb build/screen-toolbox_$(VERSION)_all.deb
+	@echo "Instale com as dependências: sudo apt install ./build/screen-toolbox_$(VERSION)_all.deb"
 
 clean:
 	rm -rf build
