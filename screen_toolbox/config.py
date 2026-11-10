@@ -1,4 +1,4 @@
-"""Configuração persistida em ~/.config/screen-toolbox/config.json."""
+"""Configuração persistida em ~/.config/screen-toolbox/config.json (Windows: %LOCALAPPDATA%)."""
 
 import json
 import os
@@ -40,6 +40,7 @@ DEFAULTS = {
     "minimize_on_record": True,
     "remember_source": True,
     "restore_token": "",
+    "record_monitor": 0,  # Windows: índice em win32.screenshot.monitors() (0 = principal)
     # Teclas / cliques no vídeo
     "show_keys": True,
     "show_clicks": True,

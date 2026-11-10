@@ -2,7 +2,8 @@
 
 Prints com anotações e gravação de tela mostrando teclas e cliques — tudo em um app só.
 Feito com Python + GTK4/libadwaita + GStreamer + xdg-desktop-portal, então funciona em
-Wayland e X11 (GNOME, KDE, Hyprland, Sway…) no Debian/Ubuntu, Fedora e Arch.
+Wayland e X11 (GNOME, KDE, Hyprland, Sway…) no Debian/Ubuntu, Fedora e Arch, e também no
+Windows 10/11.
 
 ## Recursos
 
@@ -20,6 +21,34 @@ Wayland e X11 (GNOME, KDE, Hyprland, Sway…) no Debian/Ubuntu, Fedora e Arch.
   encerrar use **Sair** no menu (`Ctrl+Q`). Dá para desligar em Preferências → Geral.
 - **Gravação** (sempre da tela inteira): MP4 (H.264/AAC) ou WebM (VP9/Opus), microfone e áudio do sistema
   (ambos desligados por padrão), teclas e cliques desenhados no vídeo.
+
+## Windows
+
+Baixe o `ScreenToolbox-<versão>-setup.exe` na página de
+[Releases](https://github.com/nicolas-tavaress/screen-toolbox/releases) e instale (não pede
+administrador). O instalador ainda não é assinado: se o SmartScreen avisar, clique em
+**Mais informações → Executar assim mesmo**.
+
+- **Atalhos globais**: `Ctrl+Alt+S` captura uma área e `Ctrl+Alt+R` inicia/para a gravação,
+  em qualquer programa, enquanto o app estiver aberto (inclusive só na bandeja).
+- **Bandeja**: o ícone fica sempre ativo; clique para abrir a janela e use o botão direito
+  para o menu. As notificações aparecem como balões do ícone.
+- **Gravação**: escolha o monitor em Preferências → Vídeo → Tela a gravar. Teclas e cliques
+  aparecem no vídeo sem nenhuma configuração extra.
+- **Iniciar com o Windows**: opção no instalador (abre direto na bandeja).
+- Logs em `%LOCALAPPDATA%\screen-toolbox\screen-toolbox.log`.
+
+### Gerar o instalador
+
+O workflow `.github/workflows/windows-release.yml` gera o instalador no GitHub Actions
+(manual ou a cada tag `v*`, que também publica a release). Para gerar localmente, no shell
+**UCRT64** do [MSYS2](https://www.msys2.org/):
+
+```sh
+bash packaging/windows/build.sh --install   # instala as dependências e gera build/windows/dist/
+build/windows/dist/screen-toolbox/screen-toolbox.exe --self-test teste.txt   # confere o pacote
+iscc /DAppVersion=0.1.0 packaging/windows/screen-toolbox.iss                  # gera o setup.exe
+```
 
 ## Rodar a partir do código
 

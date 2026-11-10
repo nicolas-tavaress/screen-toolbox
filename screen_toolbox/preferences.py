@@ -7,6 +7,7 @@ from pathlib import Path
 
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
+from . import IS_WINDOWS
 from .config import config
 
 POSITIONS = [
@@ -44,10 +45,11 @@ class PreferencesDialog(Adw.PreferencesDialog):
                                   "Fechar a janela não encerra o app; use “Sair” no menu para encerrar")
         background.connect("notify::active", lambda r, _p: application.set_background(r.get_active()))
         app_group.add(background)
-        tray = self._switch("show_tray", "Ícone na barra superior",
-                            "Acesso rápido a print, gravação e sair (no GNOME requer a extensão AppIndicator)")
-        tray.connect("notify::active", lambda r, _p: application.set_tray(r.get_active()))
-        app_group.add(tray)
+        if not IS_WINDOWS:  # no Windows o ícone na bandeja fica sempre ativo
+            tray = self._switch("show_tray", "Ícone na barra superior",
+                                "Acesso rápido a print, gravação e sair (no GNOME requer a extensão AppIndicator)")
+            tray.connect("notify::active", lambda r, _p: application.set_tray(r.get_active()))
+            app_group.add(tray)
         general.add(app_group)
         self.add(general)
 
@@ -62,12 +64,17 @@ class PreferencesDialog(Adw.PreferencesDialog):
         capture = Adw.PreferencesGroup(title="Captura")
         capture.add(self._switch("record_cursor", "Mostrar o cursor"))
         capture.add(self._switch("minimize_on_record", "Minimizar ao gravar"))
-        remember = self._switch("remember_source", "Lembrar a tela escolhida",
-                                "Não pergunta qual tela gravar nas próximas vezes")
-        forget = Gtk.Button(label="Esquecer", valign=Gtk.Align.CENTER, tooltip_text="Perguntar novamente na próxima gravação")
-        forget.connect("clicked", lambda *_: (config.set("restore_token", ""), self._toast("A tela será perguntada novamente")))
-        remember.add_suffix(forget)
-        capture.add(remember)
+        if IS_WINDOWS:
+            capture.add(self._monitor_row())
+        else:
+            remember = self._switch("remember_source", "Lembrar a tela escolhida",
+                                    "Não pergunta qual tela gravar nas próximas vezes")
+            forget = Gtk.Button(label="Esquecer", valign=Gtk.Align.CENTER,
+                                tooltip_text="Perguntar novamente na próxima gravação")
+            forget.connect("clicked", lambda *_: (config.set("restore_token", ""),
+                                                  self._toast("A tela será perguntada novamente")))
+            remember.add_suffix(forget)
+            capture.add(remember)
         video.add(capture)
         audio = Adw.PreferencesGroup(title="Áudio", description="Ambos desligados por padrão")
         audio.add(self._switch("record_mic", "Microfone"))
@@ -88,6 +95,24 @@ class PreferencesDialog(Adw.PreferencesDialog):
 
         # --- Atalhos ---
         shortcuts = Adw.PreferencesPage(title="Atalhos", icon_name="preferences-desktop-keyboard-shortcuts-symbolic")
+        shortcuts.add(self._windows_shortcuts() if IS_WINDOWS else self._command_shortcuts())
+        self.add(shortcuts)
+
+    def _windows_shortcuts(self):
+        from .win32.shell import HOTKEY_LABELS
+
+        group = Adw.PreferencesGroup(
+            title="Atalhos globais",
+            description="Funcionam em qualquer programa enquanto o Screen Toolbox estiver aberto (inclusive na bandeja).",
+        )
+        for title, keys in HOTKEY_LABELS:
+            row = Adw.ActionRow(title=title)
+            row.add_suffix(Gtk.ShortcutLabel(accelerator=keys.replace("Ctrl+", "<Ctrl>").replace("Alt+", "<Alt>"),
+                                             valign=Gtk.Align.CENTER))
+            group.add(row)
+        return group
+
+    def _command_shortcuts(self):
         group = Adw.PreferencesGroup(
             title="Atalhos globais",
             description=(
@@ -99,8 +124,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
         for title, arg in (("Capturar área", "--screenshot"),
                            ("Iniciar/parar gravação", "--record"), ("Parar gravação", "--stop")):
             group.add(self._command_row(title, f"{cmd} {arg}"))
-        shortcuts.add(group)
-        self.add(shortcuts)
+        return group
 
     # --- linhas ----------------------------------------------------------
     def _toast(self, text):
@@ -130,6 +154,15 @@ class PreferencesDialog(Adw.PreferencesDialog):
         row.set_selected(values.index(current) if current in values else 0)
         row.connect("notify::selected", lambda r, _p: config.set(key, values[r.get_selected()]))
         return row
+
+    def _monitor_row(self):
+        from .win32.screenshot import monitors
+
+        options = []
+        for i, m in enumerate(monitors()):
+            name = "Principal" if m["primary"] else f"Monitor {i + 1}"
+            options.append((i, f"{name} ({m['width']}×{m['height']})"))
+        return self._combo("record_monitor", "Tela a gravar", options or [(0, "Principal")])
 
     def _folder_row(self, key, title):
         row = Adw.ActionRow(title=title, subtitle=config.get(key))

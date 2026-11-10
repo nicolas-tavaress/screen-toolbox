@@ -1,6 +1,7 @@
 """Logging do app.
 
-- Sempre grava em ~/.local/state/screen-toolbox/screen-toolbox.log (INFO+, rotativo).
+- Sempre grava em ~/.local/state/screen-toolbox/screen-toolbox.log (INFO+, rotativo);
+  no Windows, em %LOCALAPPDATA%/screen-toolbox/screen-toolbox.log.
 - Modo dev (--dev ou SCREEN_TOOLBOX_DEV=1): mostra tudo (DEBUG+) colorido no terminal.
 - Modo normal: só WARNING+ no terminal.
 """
@@ -12,7 +13,16 @@ import sys
 import threading
 from pathlib import Path
 
-LOG_DIR = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state") / "screen-toolbox"
+def _state_dir():
+    try:
+        from gi.repository import GLib
+
+        return Path(GLib.get_user_state_dir())  # GLib >= 2.72; no Windows é %LOCALAPPDATA%
+    except (ImportError, AttributeError):
+        return Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state")
+
+
+LOG_DIR = _state_dir() / "screen-toolbox"
 LOG_FILE = LOG_DIR / "screen-toolbox.log"
 
 COLORS = {
@@ -44,10 +54,12 @@ def setup(dev=False):
     root.handlers.clear()
     root.propagate = False
 
-    console = logging.StreamHandler(sys.stderr)
-    console.setLevel(logging.DEBUG if dev else logging.WARNING)
-    console.setFormatter(ColorFormatter(dev and sys.stderr.isatty()))
-    root.addHandler(console)
+    # executável "windowed" do Windows não tem console (sys.stderr é None)
+    if sys.stderr is not None:
+        console = logging.StreamHandler(sys.stderr)
+        console.setLevel(logging.DEBUG if dev else logging.WARNING)
+        console.setFormatter(ColorFormatter(dev and sys.stderr.isatty()))
+        root.addHandler(console)
 
     try:
         LOG_DIR.mkdir(parents=True, exist_ok=True)

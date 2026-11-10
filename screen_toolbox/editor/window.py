@@ -9,7 +9,7 @@ from pathlib import Path
 
 from gi.repository import Adw, Gdk, GLib, Gtk
 
-from .. import log
+from .. import IS_WINDOWS, log
 from ..config import config
 from ..name_dialog import ask_filename
 from .canvas import Canvas
@@ -312,7 +312,14 @@ class CaptureWindow(Adw.ApplicationWindow):
     # --- ações finais ----------------------------------------------------
     def _copy(self):
         data = self.canvas.export_png_bytes()
-        self.get_clipboard().set_content(Gdk.ContentProvider.new_for_bytes("image/png", GLib.Bytes.new(data)))
+        png = GLib.Bytes.new(data)
+        provider = Gdk.ContentProvider.new_for_bytes("image/png", png)
+        if IS_WINDOWS:
+            # a textura faz o GDK oferecer também o formato de bitmap (CF_DIB), que é o que
+            # Paint, Word e a maioria dos apps do Windows aceitam ao colar
+            texture = Gdk.ContentProvider.new_for_value(Gdk.Texture.new_from_bytes(png))
+            provider = Gdk.ContentProvider.new_union([texture, provider])
+        self.get_clipboard().set_content(provider)
         logger.info("Imagem copiada para a área de transferência (%.0f KB)", len(data) / 1024)
         # No Wayland a área de transferência pertence ao app: mantém o app vivo após fechar
         self.get_application().keep_clipboard_alive()

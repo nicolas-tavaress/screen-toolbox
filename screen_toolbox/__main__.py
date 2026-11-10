@@ -16,6 +16,9 @@ Instale o pacote da sua distribuição:
   Fedora:        sudo dnf install python3-gobject
   Arch:          sudo pacman -S python-gobject python-cairo"""
 
+MISSING_CAIRO_WINDOWS = """Screen Toolbox: a integração PyGObject <-> Cairo não foi encontrada.
+A instalação parece estar incompleta; reinstale o Screen Toolbox."""
+
 
 def show_startup_error(message):
     """Mostra o erro numa janela: aberto pelo menu, ninguém vê o terminal."""
@@ -42,9 +45,16 @@ def show_startup_error(message):
 def main():
     import os
 
-    from . import log
+    from . import IS_WINDOWS, log
 
     argv = list(sys.argv)
+    if "--self-test" in argv:
+        # verificação do pacote (usada no CI do Windows); não abre janelas
+        from .selftest import run
+
+        index = argv.index("--self-test")
+        return run(argv[index + 1] if index + 1 < len(argv) else None)
+
     dev = "--dev" in argv or os.environ.get("SCREEN_TOOLBOX_DEV") == "1"
     argv = [a for a in argv if a != "--dev"]
     if dev:
@@ -55,9 +65,15 @@ def main():
     try:
         gi.require_foreign("cairo")
     except ImportError:
-        logger.critical(MISSING_CAIRO)
-        show_startup_error(MISSING_CAIRO)
+        message = MISSING_CAIRO_WINDOWS if IS_WINDOWS else MISSING_CAIRO
+        logger.critical(message)
+        show_startup_error(message)
         return 1
+
+    if IS_WINDOWS:
+        from .win32 import enable_dpi_awareness
+
+        enable_dpi_awareness()
 
     from .app import ScreenToolboxApp
 

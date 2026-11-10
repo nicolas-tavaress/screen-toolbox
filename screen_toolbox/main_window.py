@@ -2,10 +2,10 @@
 
 from gi.repository import Adw, Gio, Gtk
 
-from . import APP_NAME
+from . import APP_NAME, IS_WINDOWS
 from .config import config
 
-IDLE, STARTING, RECORDING, STOPPING = range(4)
+IDLE, STARTING, RECORDING, STOPPING, NAMING = range(5)
 
 
 def fmt_time(seconds):
@@ -109,7 +109,8 @@ class MainWindow(Adw.ApplicationWindow):
         from .record.input_events import input_access_ok
 
         wants = config.get("show_keys") or config.get("show_clicks")
-        self.banner.set_revealed(bool(wants) and not input_access_ok())
+        # no Windows os hooks de teclado não exigem permissão especial
+        self.banner.set_revealed(bool(wants) and not IS_WINDOWS and not input_access_ok())
 
     def _show_input_help(self, *_):
         dialog = Adw.AlertDialog(
@@ -146,8 +147,13 @@ class MainWindow(Adw.ApplicationWindow):
         elif state == RECORDING:
             self.record_label.set_label(f"Parar gravação  •  {fmt_time(elapsed)}")
             self.record_btn.set_sensitive(True)
-            self.status.set_label("Gravando… (também dá para parar pelo indicador do sistema)")
+            self.status.set_label("Gravando… (também dá para parar pelo ícone na bandeja ou com Ctrl+Alt+R)"
+                                  if IS_WINDOWS else "Gravando… (também dá para parar pelo indicador do sistema)")
         elif state == STOPPING:
             self.record_label.set_label("Finalizando…")
             self.record_btn.set_sensitive(False)
             self.status.set_label("Salvando o vídeo")
+        elif state == NAMING:
+            self.record_label.set_label("Nomear vídeo anterior…")
+            self.record_btn.set_sensitive(True)
+            self.status.set_label("Dê um nome ao vídeo ou descarte a gravação")

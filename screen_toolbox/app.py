@@ -2,21 +2,27 @@
 
 import os
 import platform
+import threading
 from pathlib import Path
 
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
-from . import APP_ID, APP_NAME, VERSION, log
+from . import APP_ID, APP_NAME, IS_WINDOWS, VERSION, log
 from .capture.region import monitor_crop
-from .capture.screenshot import take_screenshot
 from .config import config
 from .editor.window import CaptureWindow
-from .main_window import IDLE, RECORDING, STARTING, STOPPING, MainWindow, fmt_time
-from .name_dialog import ask_filename
+from .main_window import IDLE, NAMING, RECORDING, STARTING, STOPPING, MainWindow, fmt_time
+from .name_dialog import FilenamePrompt, ask_filename
+
+if IS_WINDOWS:
+    from .win32.screenshot import take_screenshot
+else:
+    from .capture.screenshot import take_screenshot
 
 logger = log.get(__name__)
 
-STATE_NAMES = {IDLE: "parado", STARTING: "iniciando", RECORDING: "gravando", STOPPING: "finalizando"}
+STATE_NAMES = {IDLE: "parado", STARTING: "iniciando", RECORDING: "gravando", STOPPING: "finalizando",
+               NAMING: "aguardando nome"}
 
 
 def _code_stamp():
@@ -25,17 +31,43 @@ def _code_stamp():
     return max((p.stat().st_mtime for p in root.rglob("*.py")), default=0)
 
 
+def _session_bus_available(timeout=5):
+    """A instância única do GApplication usa o D-Bus de sessão. No Windows o GLib sobe um
+    (gdbus.exe) sob demanda; se isso falhar, o app roda sem instância única em vez de
+    não abrir."""
+    result = []
+
+    def probe():
+        try:
+            result.append(Gio.bus_get_sync(Gio.BusType.SESSION, None) is not None)
+        except GLib.Error as e:
+            logger.warning("D-Bus de sessão indisponível: %s", e.message)
+            result.append(False)
+
+    thread = threading.Thread(target=probe, name="dbus-probe", daemon=True)
+    thread.start()
+    thread.join(timeout)
+    return bool(result and result[0])
+
+
 class ScreenToolboxApp(Adw.Application):
     def __init__(self, dev=False):
         # no modo dev usa outro ID, para não ser redirecionado para uma instância instalada aberta
         app_id = f"{APP_ID}.Devel" if dev else APP_ID
-        super().__init__(application_id=app_id, flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
+        flags = Gio.ApplicationFlags.HANDLES_COMMAND_LINE
+        if IS_WINDOWS and not _session_bus_available():
+            logger.warning("Sem D-Bus de sessão: rodando sem instância única "
+                           "(atalhos do menu Iniciar abrirão uma nova instância)")
+            flags |= Gio.ApplicationFlags.NON_UNIQUE
+        super().__init__(application_id=app_id, flags=flags)
         self.dev = dev
         self.main_window = None
         self.capturing = False
         self.record_state = IDLE
         self.cast = None
         self.recorder = None
+        self._pending_video = None  # vídeo gravado ainda sem nome
+        self._name_prompt = None  # diálogo aberto para esse vídeo (nome ou descarte)
         self.input_monitor = None
         self.key_overlay = None
         self._timer = 0
@@ -53,6 +85,8 @@ class ScreenToolboxApp(Adw.Application):
                              "Iniciar/parar gravação de tela", None)
         self.add_main_option("stop", 0, GLib.OptionFlags.NONE, GLib.OptionArg.NONE,
                              "Parar a gravação em andamento", None)
+        self.add_main_option("background", 0, GLib.OptionFlags.NONE, GLib.OptionArg.NONE,
+                             "Iniciar em segundo plano, sem abrir a janela", None)
 
     # --- ciclo de vida ---------------------------------------------------
     def do_startup(self):
@@ -85,7 +119,9 @@ class ScreenToolboxApp(Adw.Application):
         self.set_accels_for_action("app.preferences", ["<Ctrl>comma"])
         self.set_accels_for_action("app.quit", ["<Ctrl>q"])
         self.set_background(config.get("run_in_background"))
-        self.set_tray(config.get("show_tray"))
+        # no Windows o ícone fica sempre ativo: ele também registra os atalhos globais
+        # e mostra as notificações
+        self.set_tray(IS_WINDOWS or config.get("show_tray"))
 
     def do_shutdown(self):
         logger.info("Encerrando o app")
@@ -104,9 +140,6 @@ class ScreenToolboxApp(Adw.Application):
     def _log_environment(self):
         from gi.repository import Gst
 
-        from .portal import get_portal
-        from .record.input_events import readable_devices
-
         if not Gst.is_initialized():
             Gst.init(None)
         logger.info("%s %s (app id %s)%s", APP_NAME, VERSION, self.get_application_id(),
@@ -116,9 +149,13 @@ class ScreenToolboxApp(Adw.Application):
                     Gtk.get_major_version(), Gtk.get_minor_version(), Gtk.get_micro_version(),
                     Adw.get_major_version(), Adw.get_minor_version(), Adw.get_micro_version(),
                     Gst.version_string())
-        logger.info("Sessão: %s | Desktop: %s | Backend GDK: %s",
-                    os.environ.get("XDG_SESSION_TYPE", "?"), os.environ.get("XDG_CURRENT_DESKTOP", "?"),
-                    type(Gdk.Display.get_default()).__name__)
+        if IS_WINDOWS:
+            logger.info("Sistema: %s | Backend GDK: %s", platform.platform(),
+                        type(Gdk.Display.get_default()).__name__)
+        else:
+            logger.info("Sessão: %s | Desktop: %s | Backend GDK: %s",
+                        os.environ.get("XDG_SESSION_TYPE", "?"), os.environ.get("XDG_CURRENT_DESKTOP", "?"),
+                        type(Gdk.Display.get_default()).__name__)
         display = Gdk.Display.get_default()
         monitors = display.get_monitors()
         for i in range(monitors.get_n_items()):
@@ -127,6 +164,19 @@ class ScreenToolboxApp(Adw.Application):
             scale = m.get_scale() if hasattr(m, "get_scale") else m.get_scale_factor()
             logger.info("Monitor %d: %s %dx%d+%d+%d escala %.2f", i, m.get_connector(), g.width, g.height,
                         g.x, g.y, scale)
+        if not IS_WINDOWS:
+            self._log_linux_environment()
+        logger.debug("Configuração: %s", {k: v for k, v in config.items() if k != "restore_token"})
+        orphans = sorted(Path(config.get("video_dir")).glob(".screen-toolbox-*.part.*"))
+        if orphans:
+            logger.warning("Gravações não nomeadas de sessões anteriores (renomeie para recuperar): %s",
+                           ", ".join(str(p) for p in orphans))
+
+    @staticmethod
+    def _log_linux_environment():
+        from .portal import get_portal
+        from .record.input_events import readable_devices
+
         portal = get_portal()
         logger.info("Portais: Screenshot v%s | ScreenCast v%s (fontes=%s, cursor=%s)",
                     portal.get_property("org.freedesktop.portal.Screenshot", "version", "ausente"),
@@ -139,11 +189,6 @@ class ScreenToolboxApp(Adw.Application):
         else:
             logger.warning("Nenhum /dev/input/event* legível: teclas/cliques não aparecerão nos vídeos "
                            "(adicione o usuário ao grupo 'input')")
-        logger.debug("Configuração: %s", {k: v for k, v in config.items() if k != "restore_token"})
-        orphans = sorted(Path(config.get("video_dir")).glob(".screen-toolbox-*.part.*"))
-        if orphans:
-            logger.warning("Gravações não nomeadas de sessões anteriores (renomeie para recuperar): %s",
-                           ", ".join(str(p) for p in orphans))
 
     def do_command_line(self, command_line):
         opts = command_line.get_options_dict().end().unpack()
@@ -167,12 +212,15 @@ class ScreenToolboxApp(Adw.Application):
             self.toggle_recording()
         elif opts.get("screenshot"):
             self.capture()
+        elif opts.get("background"):
+            logger.info("Iniciado em segundo plano")
         else:
             self.activate()
         return 0
 
     def _should_restart(self):
-        return (self._code_stamp != _code_stamp() and self.record_state == IDLE
+        # no Windows o app roda empacotado (sem `make install` sobre o código em uso)
+        return (not IS_WINDOWS and self._code_stamp != _code_stamp() and self.record_state == IDLE
                 and not self.capturing and self._clipboard_hold is None)
 
     def do_activate(self):
@@ -195,15 +243,20 @@ class ScreenToolboxApp(Adw.Application):
         logger.info("Janela fechada; app continua em segundo plano")
         if not config.get("background_notice_shown"):
             config.set("background_notice_shown", True)
-            notification = Gio.Notification.new(APP_NAME)
-            notification.set_body("Continua rodando em segundo plano. Para encerrar, use “Sair” no menu (Ctrl+Q).")
-            self.send_notification("background", notification)
+            text = "Continua rodando em segundo plano. Para encerrar, use “Sair” no menu (Ctrl+Q)."
+            if IS_WINDOWS:
+                text = "Continua rodando na bandeja. Para encerrar, use “Sair” no menu do ícone."
+            self._system_notification(text, notification_id="background")
 
     def request_quit(self):
         if self.record_state != IDLE:
             logger.warning("Sair bloqueado: gravação em estado '%s'", STATE_NAMES[self.record_state])
             self._present_main_window()
-            self.notify_user("Pare a gravação antes de sair.")
+            if self.record_state == NAMING:
+                self._raise_name_prompt()
+                self.notify_user("Salve ou descarte o vídeo antes de sair.")
+            else:
+                self.notify_user("Pare a gravação antes de sair.")
             return
         logger.info("Saindo do app (pedido do usuário)")
         self.quit()
@@ -226,13 +279,21 @@ class ScreenToolboxApp(Adw.Application):
             logger.debug("Toast: %s", text)
             win.toast(text, button, action, target)
             return
+        self._system_notification(text, button, action, target)
+
+    def _system_notification(self, text, button=None, action=None, target=None, notification_id=None):
         logger.debug("Notificação do sistema: %s", text)
+        if IS_WINDOWS:
+            # o GLib não tem backend de notificações no Windows: usa o balão da bandeja
+            if self.tray is not None:
+                self.tray.notify(text, action, target)
+            return
         notification = Gio.Notification.new(APP_NAME)
         notification.set_body(text)
         if button and action:
             notification.add_button_with_target(button, action, target)
             notification.set_default_action_and_target(action, target)
-        self.send_notification(None, notification)
+        self.send_notification(notification_id, notification)
 
     def open_file(self, path):
         """Abre com o app padrão; sem app padrão o sistema oferece "Abrir com…".
@@ -323,7 +384,7 @@ class ScreenToolboxApp(Adw.Application):
 
         def on_shot(surface, error):
             if surface is None:
-                if error and not permission_attempted:
+                if error and not permission_attempted and not IS_WINDOWS:
                     request_permission()
                     return
                 restore()
@@ -391,17 +452,29 @@ class ScreenToolboxApp(Adw.Application):
             self.start_recording()
         elif self.record_state == RECORDING:
             self.stop_recording()
+        elif self.record_state == NAMING:
+            logger.info("Nova gravação bloqueada: o vídeo anterior ainda não tem nome")
+            self._raise_name_prompt()
+            self.notify_user("Dê um nome ou descarte a gravação anterior antes de gravar outra.")
         else:
             logger.warning("Alternar gravação ignorado no estado '%s'", STATE_NAMES[self.record_state])
 
     def start_recording(self):
-        from .record.screencast import ScreenCastSession
-
         if self.record_state != IDLE:
             return
         self._set_record_state(STARTING)
         self.hold()
         self._update_record_ui()
+        if IS_WINDOWS:
+            from .win32.screencast import WinScreenSource
+
+            self.cast = WinScreenSource(config.get("record_monitor"))
+            self.cast.start(self._on_cast_ready, self._on_cast_error, self._on_cast_closed,
+                            show_cursor=config.get("record_cursor"))
+            return
+
+        from .record.screencast import ScreenCastSession
+
         self.cast = ScreenCastSession()
         remember = config.get("remember_source")
         token = config.get("restore_token") if remember else ""
@@ -429,13 +502,19 @@ class ScreenToolboxApp(Adw.Application):
         elif self.record_state == STARTING:
             self._cleanup_recording()
 
-    def _on_cast_ready(self, fd, node_id, size):
-        from .record.input_events import InputMonitor, KeystrokeModel, input_access_ok
-        from .record.keymap import KeyLabeler
+    def _on_cast_ready(self, video_source, details):
+        from .record.input_events import KeystrokeModel
         from .record.overlay import KeyOverlay
         from .record.pipeline import Recorder
 
-        logger.info("Tela compartilhada: nó PipeWire %s, tamanho %s", node_id, size)
+        if IS_WINDOWS:
+            from .win32.input_hook import InputMonitor, input_access_ok
+            from .win32.keylabel import WinKeyLabeler as KeyLabeler
+        else:
+            from .record.input_events import InputMonitor, input_access_ok
+            from .record.keymap import KeyLabeler
+
+        logger.info("Tela compartilhada: %s", details)
         if config.get("remember_source") and self.cast.restore_token:
             config.set("restore_token", self.cast.restore_token)
         elif self.cast.not_monitor:
@@ -457,7 +536,7 @@ class ScreenToolboxApp(Adw.Application):
 
         options = {k: config.get(k) for k in ("video_dir", "video_format", "fps", "record_mic", "record_system_audio")}
         try:
-            self.recorder = Recorder(fd, node_id, options, overlay, self._on_record_finished)
+            self.recorder = Recorder(video_source, options, overlay, self._on_record_finished)
             self.recorder.start()
         except Exception as e:  # noqa: BLE001
             logger.exception("Não foi possível iniciar a gravação")
@@ -496,18 +575,41 @@ class ScreenToolboxApp(Adw.Application):
             return
         logger.info("Gravação pronta (%.1f MB); pedindo o nome do arquivo", path.stat().st_size / 1e6)
         self.hold()  # mantém o app vivo até o usuário nomear ou descartar
+        self._pending_video = path
+        self._set_record_state(NAMING)  # bloqueia nova gravação até nomear ou descartar
+        self._update_record_ui()
         self._ask_video_name(path)
+
+    def _finish_naming(self):
+        self._pending_video = None
+        self._name_prompt = None
+        self._set_record_state(IDLE)
+        self._update_record_ui()
+        self.release()
+
+    def _raise_name_prompt(self):
+        """Traz o diálogo pendente para frente recriando-o (janela nova aparece no topo)."""
+        prompt = self._name_prompt
+        if prompt is None or self._pending_video is None:
+            return
+        prompt.close_silently()
+        if prompt.kind == "discard":
+            self._confirm_discard(self._pending_video)
+        else:
+            self._ask_video_name(self._pending_video, prompt.text())
 
     def _present_main_window(self):
         win = self._ensure_main_window()
         win.present()
         return win
 
-    def _ask_video_name(self, temp_path):
-        """O nome é obrigatório; cancelar oferece descartar a gravação."""
-        win = self._present_main_window()
+    def _ask_video_name(self, temp_path, initial=""):
+        """O nome é obrigatório; cancelar oferece descartar a gravação.
+
+        O diálogo abre numa janela própria (sem pai), para aparecer sobre os outros apps."""
 
         def on_named(target):
+            self._name_prompt = None
             if target is None:
                 self._confirm_discard(temp_path)
                 return
@@ -516,13 +618,14 @@ class ScreenToolboxApp(Adw.Application):
             except OSError as e:
                 logger.error("Não foi possível renomear %s para %s: %s", temp_path, target, e)
                 self.notify_user(f"Erro ao salvar o vídeo: {e.strerror}")
-                self._ask_video_name(temp_path)
+                self._ask_video_name(temp_path, target.stem)
                 return
             logger.info("Vídeo salvo: %s", target)
             self.notify_user(f"Vídeo salvo: {target.name}", "Abrir", "app.open-file", GLib.Variant("s", str(target)))
-            self.release()
+            self._finish_naming()
 
-        ask_filename(win, "Nome do vídeo", config.get("video_dir"), temp_path.suffix, on_named)
+        self._name_prompt = ask_filename(None, "Nome do vídeo", config.get("video_dir"), temp_path.suffix,
+                                         on_named, initial=initial)
 
     def _confirm_discard(self, temp_path):
         dialog = Adw.AlertDialog(heading="Descartar gravação?",
@@ -534,6 +637,9 @@ class ScreenToolboxApp(Adw.Application):
         dialog.set_close_response("back")
 
         def on_response(_d, response):
+            if state["silent"]:
+                return
+            self._name_prompt = None
             if response == "discard":
                 try:
                     temp_path.unlink()
@@ -541,12 +647,14 @@ class ScreenToolboxApp(Adw.Application):
                 except OSError as e:
                     logger.error("Não foi possível apagar %s: %s", temp_path, e)
                 self.notify_user("Gravação descartada")
-                self.release()
+                self._finish_naming()
             else:
                 self._ask_video_name(temp_path)
 
+        state = {"silent": False}
         dialog.connect("response", on_response)
-        dialog.present(self._present_main_window())
+        dialog.present(None)  # janela própria, sobre os outros apps
+        self._name_prompt = FilenamePrompt(dialog, None, state, kind="discard")
 
     def _cleanup_recording(self):
         if self.key_overlay is not None:
@@ -585,12 +693,16 @@ class ScreenToolboxApp(Adw.Application):
                 STARTING: ("Escolha a tela…", False),
                 RECORDING: (f"Parar gravação  •  {fmt_time(elapsed)}", True),
                 STOPPING: ("Finalizando…", False),
+                NAMING: ("Nomear vídeo anterior…", True),
             }[self.record_state]
             self.tray.update_record_state(self.record_state == RECORDING, label, enabled)
 
     def set_tray(self, enabled):
-        """Ícone na barra superior (StatusNotifierItem)."""
-        from .tray import Tray
+        """Ícone na barra superior (StatusNotifierItem) ou na bandeja do Windows."""
+        if IS_WINDOWS:
+            from .win32.shell import Tray
+        else:
+            from .tray import Tray
 
         if enabled and self.tray is None:
             self.tray = Tray(self)

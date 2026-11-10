@@ -1,11 +1,11 @@
-"""Pipeline GStreamer: PipeWire (tela) + áudio opcional + overlay de teclas -> arquivo."""
+"""Pipeline GStreamer: tela (PipeWire ou Direct3D 11) + áudio opcional + overlay de teclas -> arquivo."""
 
 import time
 from pathlib import Path
 
 from gi.repository import GLib, Gst
 
-from .. import log
+from .. import IS_WINDOWS, log
 
 logger = log.get(__name__)
 
@@ -16,6 +16,7 @@ FIRST_FRAME_TIMEOUT = 8  # segundos
 # gravado continua reproduzível, ao contrário do MP4 comum que só escreve o índice no final.
 MP4_MUX = "mp4mux fragment-duration=1000"
 TEMP_PREFIX = ".screen-toolbox-"
+AUDIO_QUEUE = "max-size-time=5000000000 max-size-buffers=0 max-size-bytes=0"
 
 
 def _has(name):
@@ -30,6 +31,8 @@ def choose_format(preference="auto"):
                "! video/x-h264,profile=high"
     elif _has("openh264enc"):
         h264 = "openh264enc bitrate=12000000 complexity=low"
+    elif _has("mfh264enc"):
+        h264 = "mfh264enc bitrate=12000"  # Media Foundation (Windows), em kbit/s
     if h264 and _has("h264parse"):
         h264 += " ! h264parse"
 
@@ -56,15 +59,35 @@ def choose_format(preference="auto"):
         return "webm", f"video/x-raw,format=I420 ! {vpx}", "webmmux", webm_audio
     if h264 and _has("mp4mux"):
         return "mp4", f"video/x-raw,format=I420 ! {h264}", MP4_MUX, mp4_audio
+    if IS_WINDOWS:
+        raise RuntimeError("Nenhum codificador de vídeo encontrado. A instalação parece incompleta; "
+                           "reinstale o Screen Toolbox.")
     raise RuntimeError(
         "Nenhum codificador de vídeo encontrado. Instale o GStreamer 'plugins-ugly' (x264) ou 'plugins-good' (vpx)."
     )
 
 
+def audio_sources(mic, system):
+    """Fontes de áudio do GStreamer para o microfone e o som do sistema."""
+    sources = []
+    if IS_WINDOWS:
+        if mic:
+            sources.append("wasapi2src do-timestamp=true")
+        if system:
+            sources.append("wasapi2src loopback=true do-timestamp=true")
+    else:
+        if mic:
+            sources.append("pulsesrc do-timestamp=true")
+        if system:
+            sources.append("pulsesrc device=@DEFAULT_MONITOR@ do-timestamp=true")
+    return sources
+
+
 class Recorder:
     """Grava a tela em arquivo. on_finished(caminho, erro) é chamado no loop principal."""
 
-    def __init__(self, fd, node_id, options, overlay=None, on_finished=None):
+    def __init__(self, video_source, options, overlay=None, on_finished=None):
+        """video_source: elemento GStreamer da tela, com `name=screen` (ver record/screencast.py)."""
         self.options = options
         self.overlay = overlay
         self.on_finished = on_finished
@@ -88,26 +111,24 @@ class Recorder:
         overlay_part = "videoconvert ! cairooverlay name=overlay ! " if overlay else ""
         location = str(self.path).replace("\\", "\\\\").replace('"', '\\"')
         parts = [
-            # `path` recebe o node id devolvido pelo portal; `target-object` espera nome/serial
-            # e, com o node id, o PipeWire liga ao objeto errado e nenhum quadro chega.
-            f"pipewiresrc name=screen fd={fd} path={node_id} do-timestamp=true keepalive-time=1000 always-copy=true "
-            f"! videocrop name=evencrop ! videorate ! video/x-raw,framerate={fps}/1 "
+            f"{video_source} ! videocrop name=evencrop ! videorate ! video/x-raw,framerate={fps}/1 "
             f"! {overlay_part}videoconvert ! queue max-size-buffers=8 leaky=downstream "
             f"! {venc} ! queue ! mux.",
             f'{mux} name=mux ! filesink buffer-mode=unbuffered location="{location}"',
         ]
 
-        sources = []
-        if options.get("record_mic"):
-            sources.append("pulsesrc do-timestamp=true")
-        if options.get("record_system_audio"):
-            sources.append("pulsesrc device=@DEFAULT_MONITOR@ do-timestamp=true")
+        sources = audio_sources(options.get("record_mic"), options.get("record_system_audio"))
         if sources and not aenc:
             logger.warning("Áudio solicitado, mas nenhum encoder de áudio disponível: gravando sem áudio")
         logger.info("Áudio: microfone=%s, sistema=%s", bool(options.get("record_mic")),
                     bool(options.get("record_system_audio")))
         if sources and aenc:
-            audio_caps = "audioconvert ! audioresample ! audio/x-raw,rate=48000,channels=2 ! queue"
+            # A tela só manda quadros quando algo muda (tela parada: ~1 quadro/s via keepalive).
+            # O muxer segura o áudio até ter vídeo para intercalar; com a fila padrão (1 s) ela
+            # enche, a captura de áudio bloqueia e perde amostras (no WebM sobrava ~40% do áudio).
+            # Uma fila de 5 s absorve esses intervalos.
+            audio_caps = ("audioconvert ! audioresample ! audio/x-raw,rate=48000,channels=2 "
+                          f"! queue {AUDIO_QUEUE}")
             if len(sources) == 1:
                 parts.append(f"{sources[0]} ! {audio_caps} ! audioconvert ! audio/x-raw,channels=2 ! {aenc} ! queue ! mux.")
             else:
@@ -164,13 +185,30 @@ class Recorder:
         if self._frame_watchdog:
             GLib.source_remove(self._frame_watchdog)
             self._frame_watchdog = 0
+        self._log_audio_devices()
         return False
+
+    def _log_audio_devices(self):
+        """Registra o dispositivo real de cada fonte de áudio (ex.: qual microfone é o padrão)."""
+        iterator = self.pipeline.iterate_sources()
+        while True:
+            ok, source = iterator.next()
+            if ok != Gst.IteratorResult.OK:
+                break
+            if source.find_property("current-device") is None:
+                continue
+            requested = source.get_property("device") or "padrão"
+            logger.info("Fonte de áudio %s: %s (pedido: %s)", source.get_name(),
+                        source.get_property("current-device") or "?", requested)
 
     def _on_no_frames(self):
         self._frame_watchdog = 0
         if self.frames == 0:
-            logger.error("Nenhum quadro da tela em %d s: o PipeWire não entregou imagens", FIRST_FRAME_TIMEOUT)
-            self._finish("A tela compartilhada não enviou imagens (falha na conexão com o PipeWire).")
+            logger.error("Nenhum quadro da tela em %d s: a captura não entregou imagens", FIRST_FRAME_TIMEOUT)
+            if IS_WINDOWS:
+                self._finish("A captura da tela não enviou imagens.")
+            else:
+                self._finish("A tela compartilhada não enviou imagens (falha na conexão com o PipeWire).")
         return False
 
     def start(self):

@@ -18,7 +18,13 @@ make logs                       # tail de ~/.local/state/screen-toolbox/screen-t
 ./bin/screen-toolbox --screenshot | --record | --stop   # ações enviadas à instância em execução
 make deb                        # gera build/screen-toolbox_<versão>_all.deb
 make clean
+./bin/screen-toolbox --self-test [arquivo]   # confere bibliotecas GI, plugins GStreamer e pipeline
 ```
+
+Windows: `bash packaging/windows/build.sh [--install]` no shell UCRT64 do MSYS2 (PyInstaller, saída
+em `build/windows/dist/`), depois `iscc packaging/windows/screen-toolbox.iss`. O CI
+(`.github/workflows/windows-release.yml`) faz isso, roda o `--self-test` no pacote e publica a release
+em tags `v*`, que precisam bater com `VERSION`.
 
 Não há suíte de testes nem linter configurados. Para verificar mudanças de UI sem interação,
 escreva um script avulso (fora do repositório) que crie um `Adw.Application`, instancie a janela
@@ -26,7 +32,7 @@ escreva um script avulso (fora do repositório) que crie um `Adw.Application`, i
 e confira os resultados. Use uma surface com a proporção do monitor, porque o canvas estica a imagem
 para a tela inteira.
 
-`build/deb/` é uma cópia gerada pelo `make deb`. Não edite nem pesquise código ali.
+`build/` é gerado (`make deb`, build do Windows) e ignorado pelo git. Não edite nem pesquise código ali.
 
 A versão aparece em vários lugares: `screen_toolbox/__init__.py`, `Makefile`, `data/*.metainfo.xml`,
 `packaging/rpm/*.spec`, `packaging/arch/PKGBUILD`.
@@ -55,8 +61,9 @@ A versão aparece em vários lugares: `screen_toolbox/__init__.py`, `Makefile`, 
     para widgets ocultos.
   - O canvas emite `changed`, `selection-dragging` e `selection-started`. A escala imagem↔tela vem
     de `Canvas.scale()`.
-- **Gravação** (`record/`): a sessão ScreenCast entrega o fd e o nó para o `pipeline.Recorder`, que
-  monta uma descrição `Gst.parse_launch`: `pipewiresrc`, `videocrop` (força dimensões pares),
+- **Gravação** (`record/`): a fonte de tela (`ScreenCastSession` ou `WinScreenSource`) chama
+  `on_ready(video_source, descrição)`, onde `video_source` é um trecho de pipeline com `name=screen`.
+  O `pipeline.Recorder` monta uma descrição `Gst.parse_launch`: fonte, `videocrop` (força dimensões pares),
   `cairooverlay` opcional, encoder e mux. `choose_format` escolhe MP4 (x264) ou WebM conforme os
   plugins disponíveis. O MP4 é fragmentado, então continua reproduzível se a gravação cair. Grava num
   arquivo temporário (`.screen-toolbox-*`) e depois pede um nome obrigatório (`name_dialog.py`).
@@ -66,6 +73,19 @@ A versão aparece em vários lugares: `screen_toolbox/__init__.py`, `Makefile`, 
   Teclas digitadas nunca podem ir para o log.
 - **Bandeja** (`tray.py`): StatusNotifierItem + DBusMenu implementados direto em D-Bus, porque o
   GTK4 não tem API de bandeja.
+- **Windows** (`win32/`, só importado quando `IS_WINDOWS`): mesmas interfaces das peças do Linux,
+  implementadas com `ctypes` puro. As escolhas por plataforma ficam em `app.py`, com imports locais.
+  - `screenshot.py`: `take_screenshot` via GDI BitBlt da tela virtual e `monitors()` em pixels físicos.
+    `capture/region.py` casa os monitores do GDK com os do Windows pela ordem de posição.
+  - `screencast.py`: `WinScreenSource` (API de `ScreenCastSession`) com `d3d11screencapturesrc`, monitor
+    vindo da config `record_monitor`. Áudio via `wasapi2src` em `record/pipeline.audio_sources`.
+  - `input_hook.py`: hooks `WH_KEYBOARD_LL`/`WH_MOUSE_LL` traduzidos para eventos **evdev**, para o
+    `KeystrokeModel` ser o mesmo nas duas plataformas. `keylabel.py` faz o papel do `KeyLabeler`.
+  - `shell.py`: bandeja (`Shell_NotifyIcon`), atalhos globais (`RegisterHotKey`, Ctrl+Alt+S/R) e
+    notificações em balão, numa thread com janela oculta. No Windows a bandeja fica sempre ativa e
+    `notify_user` usa o balão, porque o `Gio.Notification` não tem backend lá.
+  - Instância única: depende do D-Bus de sessão, que o GLib sobe com o `gdbus.exe` incluído no pacote.
+    Sem ele, o app roda como `NON_UNIQUE` (`_session_bus_available` em `app.py`).
 - **Config** (`config.py`): singleton `config` com `DEFAULTS`, salvo em
   `~/.config/screen-toolbox/config.json`. As chaves em `SECRET_KEYS` (ex.: `restore_token`) não vão
   para o log.

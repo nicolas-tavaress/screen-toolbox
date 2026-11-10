@@ -28,7 +28,7 @@ class ScreenCastSession:
         self._closed_sub = 0
 
     def start(self, on_ready, on_error, on_closed, show_cursor=True, restore_token="", persist=True):
-        """on_ready(fd, node_id, size) | on_error(mensagem ou None se cancelado) | on_closed()"""
+        """on_ready(fonte_gstreamer, descrição) | on_error(mensagem ou None se cancelado) | on_closed()"""
         portal = self.portal
         version = portal.get_property(IFACE, "version", 1)
         cursor_modes = portal.get_property(IFACE, "AvailableCursorModes", CURSOR_HIDDEN)
@@ -124,13 +124,20 @@ class ScreenCastSession:
             index = result.unpack()[0]
             self.fd = fd_list.get(index)
             logger.debug("Conexão PipeWire aberta (fd %d)", self.fd)
-            on_ready(self.fd, self.node_id, self.size)
+            on_ready(self.video_source(), f"nó PipeWire {self.node_id}, tamanho {self.size}")
 
         self.portal.bus.call_with_unix_fd_list(
             BUS_NAME, OBJECT_PATH, IFACE, "OpenPipeWireRemote",
             GLib.Variant("(oa{sv})", (self.session_handle, {})), GLib.VariantType("(h)"),
             Gio.DBusCallFlags.NONE, -1, None, None, done,
         )
+
+    def video_source(self):
+        """Elemento GStreamer da tela (precisa se chamar `screen`)."""
+        # `path` recebe o node id devolvido pelo portal; `target-object` espera nome/serial
+        # e, com o node id, o PipeWire liga ao objeto errado e nenhum quadro chega.
+        return (f"pipewiresrc name=screen fd={self.fd} path={self.node_id} do-timestamp=true "
+                "keepalive-time=1000 always-copy=true")
 
     def _on_closed(self):
         """O usuário encerrou o compartilhamento pelo sistema (ex.: ícone do GNOME)."""
