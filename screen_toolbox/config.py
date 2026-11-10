@@ -26,12 +26,19 @@ DEFAULTS = {
     "screenshot_dir": str(Path(_special_dir(GLib.UserDirectory.DIRECTORY_PICTURES, "Pictures")) / "Screenshots"),
     "screenshot_delay": 0,
     "copy_on_save": False,
+    "screenshot_auto_name": True,  # False: pergunta o nome ao salvar
+    "screenshot_name_pattern": "Print-{contador}-{data}-{h}:{min}",  # campos em naming.FIELDS
+    "screenshot_counter": 0,
     # App
     "run_in_background": True,
     "show_tray": True,
     "background_notice_shown": False,
+    "setup_done": False,  # tela de configuração inicial (permissões) já exibida
     # Vídeo
     "video_dir": str(Path(_special_dir(GLib.UserDirectory.DIRECTORY_VIDEOS, "Videos")) / "Screencasts"),
+    "video_auto_name": True,
+    "video_name_pattern": "Recording-{contador}-{data}-{h}:{min}",
+    "video_counter": 0,
     "video_format": "auto",  # auto | mp4 | webm
     "fps": 30,
     "record_cursor": True,

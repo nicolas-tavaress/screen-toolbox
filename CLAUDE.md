@@ -66,11 +66,23 @@ A versão aparece em vários lugares: `screen_toolbox/__init__.py`, `Makefile`, 
   O `pipeline.Recorder` monta uma descrição `Gst.parse_launch`: fonte, `videocrop` (força dimensões pares),
   `cairooverlay` opcional, encoder e mux. `choose_format` escolhe MP4 (x264) ou WebM conforme os
   plugins disponíveis. O MP4 é fragmentado, então continua reproduzível se a gravação cair. Grava num
-  arquivo temporário (`.screen-toolbox-*`) e depois pede um nome obrigatório (`name_dialog.py`).
+  arquivo temporário (`.screen-toolbox-*`) e depois pede um nome obrigatório (`name_dialog.py`) ou,
+  com o nome automático ligado, renomeia direto conforme o padrão da config (`naming.py`, usado também
+  pelos prints). A taxa de quadros (30/60/90/120) nunca passa da taxa de atualização da tela
+  gravada: `record/framerate.py` limita as opções nas preferências e o valor em `app._record_fps`.
 - **Teclas/cliques**: `input_events.InputMonitor` é uma thread que lê `/dev/input/event*` (exige o
   grupo `input`) só durante a gravação. `KeystrokeModel` transforma os eventos em badges,
   `keymap.KeyLabeler` faz a tradução de layout e `overlay.KeyOverlay` desenha no `cairooverlay`.
   Teclas digitadas nunca podem ir para o log.
+- **Preferências** (`preferences.py`): um `Adw.Dialog` com todas as opções numa única
+  `Adw.PreferencesPage`. As abas (`Adw.ViewSwitcherBar` embaixo, com um `Adw.ViewStack` vazio só de modelo) e a busca só mudam a visibilidade de grupos e
+  linhas. Toda linha nova entra com `_add(grupo, linha, "sinônimos")`, senão a busca não a encontra.
+- **Permissões** (`permissions.py` + `permissions_dialog.py`, só Linux): a permissão de print sem
+  diálogo fica no PermissionStore do portal (tabela `screenshot`), numa entrada por app ID, e não
+  aparece nas Configurações do GNOME para apps fora de sandbox. O ID é o que o portal extrai do
+  cgroup (`portal_app_id`): o do `.desktop` quando aberto pelo menu, vazio pelo terminal. A tela abre
+  na primeira execução (config `setup_done`) e pelo menu ou Ctrl+H (`app.permissions`); "Pedir de novo" apaga a
+  entrada negada e refaz o pedido, e o grupo `input` é concedido via `pkexec usermod`.
 - **Bandeja** (`tray.py`): StatusNotifierItem + DBusMenu implementados direto em D-Bus, porque o
   GTK4 não tem API de bandeja.
 - **Windows** (`win32/`, só importado quando `IS_WINDOWS`): mesmas interfaces das peças do Linux,

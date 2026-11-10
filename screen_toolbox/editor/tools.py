@@ -152,6 +152,8 @@ def _resample(src, x, y, w, h, factor, up_filter):
 def render_shape(cr, shape, effects):
     kind = shape.kind
     cr.save()
+    # save/restore não guarda o path: um resto de outra forma viraria uma linha até esta
+    cr.new_path()
     cr.set_line_cap(cairo.LINE_CAP_ROUND)
     cr.set_line_join(cairo.LINE_JOIN_ROUND)
     cr.set_line_width(shape.width)
@@ -232,6 +234,7 @@ def render_shape(cr, shape, effects):
         cr.move_to(x - tw / 2, y - th / 2)
         cr.set_source_rgb(*_contrast(shape.color))
         PangoCairo.show_layout(cr, layout)
+        cr.new_path()  # o move_to do texto deixa um ponto corrente para trás
 
     elif kind in ("blur", "pixelate"):
         x, y, w, h = shape.rect()

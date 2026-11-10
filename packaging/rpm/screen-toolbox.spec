@@ -12,7 +12,7 @@ Requires:       python3 >= 3.10
 Requires:       python3-gobject
 Requires:       python3-cairo
 Requires:       gtk4 >= 4.10
-Requires:       libadwaita >= 1.5
+Requires:       libadwaita >= 1.7
 Requires:       gstreamer1
 Requires:       gstreamer1-plugins-base
 Requires:       gstreamer1-plugins-good
@@ -21,6 +21,8 @@ Requires:       xdg-desktop-portal
 # H.264/MP4 (RPM Fusion); sem ele o app grava em WebM (VP9)
 Recommends:     gstreamer1-plugins-ugly
 Recommends:     gstreamer1-plugin-libav
+# botão "Permitir" das teclas/cliques (pkexec)
+Recommends:     polkit
 
 %description
 Captura área ou tela inteira, edita com caneta, setas, formas, texto,

@@ -1,16 +1,15 @@
-"""Diálogo para nomear um arquivo antes de salvar (nome obrigatório, sem sugestão)."""
+"""Diálogo para nomear um arquivo antes de salvar (nome obrigatório, sem sugestão).
+
+Só é usado quando o nome automático (naming.py) está desligado ou falha."""
 
 from pathlib import Path
 
 from gi.repository import Adw, Gtk
 
 from . import IS_WINDOWS, log
+from .naming import WINDOWS_INVALID, WINDOWS_RESERVED
 
 logger = log.get(__name__)
-
-WINDOWS_INVALID = set('\\/:*?"<>|')
-WINDOWS_RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)),
-                    *(f"LPT{i}" for i in range(1, 10))}
 
 
 def _validate(text, folder, extension):

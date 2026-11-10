@@ -11,6 +11,7 @@ from gi.repository import Adw, Gdk, GLib, Gtk
 
 from .. import IS_WINDOWS, log
 from ..config import config
+from .. import naming
 from ..name_dialog import ask_filename
 from .canvas import Canvas
 from .icons import tool_icon
@@ -354,7 +355,11 @@ class CaptureWindow(Adw.ApplicationWindow):
                                                GLib.Variant("s", str(target)))
             self._finish("saved")
 
-        ask_filename(self, "Salvar captura", config.get("screenshot_dir"), ".png", on_named)
+        folder = config.get("screenshot_dir")
+        if config.get("screenshot_auto_name"):
+            on_named(naming.auto_path("screenshot", folder, ".png"))
+        else:
+            ask_filename(self, "Salvar captura", folder, ".png", on_named)
 
     def cancel(self):
         self._finish("cancelled")

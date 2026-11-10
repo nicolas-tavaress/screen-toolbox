@@ -21,6 +21,8 @@ class MainWindow(Adw.ApplicationWindow):
         header = Adw.HeaderBar()
         menu = Gio.Menu()
         menu.append("Preferências", "app.preferences")
+        if not IS_WINDOWS:
+            menu.append("Permissões", "app.permissions")
         menu.append("Sobre o Screen Toolbox", "app.about")
         menu.append("Sair", "app.quit")
         header.pack_end(Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu, tooltip_text="Menu"))
@@ -63,7 +65,7 @@ class MainWindow(Adw.ApplicationWindow):
             title="Sem acesso ao teclado/mouse: teclas não aparecerão nos vídeos",
             button_label="Como resolver",
         )
-        self.banner.connect("button-clicked", self._show_input_help)
+        self.banner.set_action_name("app.permissions")
 
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         content.append(self.banner)
@@ -76,7 +78,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.set_content(view)
         self.connect("close-request", self._on_close_request)
 
-        self._refresh_banner()
+        self.refresh_banner()
         self.update_record_state(IDLE, 0)
 
     def _on_close_request(self, _win):
@@ -102,29 +104,15 @@ class MainWindow(Adw.ApplicationWindow):
         if subtitle:
             row.set_subtitle(subtitle)
         row.set_active(bool(config.get(key)))
-        row.connect("notify::active", lambda r, _p: (config.set(key, r.get_active()), self._refresh_banner()))
+        row.connect("notify::active", lambda r, _p: (config.set(key, r.get_active()), self.refresh_banner()))
         return row
 
-    def _refresh_banner(self):
+    def refresh_banner(self):
         from .record.input_events import input_access_ok
 
         wants = config.get("show_keys") or config.get("show_clicks")
         # no Windows os hooks de teclado não exigem permissão especial
         self.banner.set_revealed(bool(wants) and not IS_WINDOWS and not input_access_ok())
-
-    def _show_input_help(self, *_):
-        dialog = Adw.AlertDialog(
-            heading="Permitir leitura de teclado e mouse",
-            body=(
-                "No Wayland, a única forma de ver as teclas durante a gravação é ler os "
-                "dispositivos de entrada do sistema. Adicione seu usuário ao grupo “input” "
-                "e reinicie a sessão:\n\n"
-                "sudo usermod -aG input $USER\n\n"
-                "A leitura só acontece enquanto uma gravação estiver ativa."
-            ),
-        )
-        dialog.add_response("ok", "Entendi")
-        dialog.present(self)
 
     def toast(self, text, button=None, action=None, target=None):
         toast = Adw.Toast(title=text, timeout=5)

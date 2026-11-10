@@ -23,16 +23,18 @@ def _has(name):
     return Gst.ElementFactory.find(name) is not None
 
 
-def choose_format(preference="auto"):
+def choose_format(preference="auto", fps=30):
     """Retorna (extensão, encoder de vídeo, muxer, encoder de áudio) conforme os plugins instalados."""
+    keyint = fps * 4  # um keyframe a cada 4 s, em qualquer taxa
+    boost = max(1.0, fps / 60)  # encoders de bitrate fixo: mais bits acima de 60 fps
     h264 = None
     if _has("x264enc"):
-        h264 = "x264enc speed-preset=veryfast tune=zerolatency pass=quant quantizer=21 key-int-max=120 " \
+        h264 = f"x264enc speed-preset=veryfast tune=zerolatency pass=quant quantizer=21 key-int-max={keyint} " \
                "! video/x-h264,profile=high"
     elif _has("openh264enc"):
-        h264 = "openh264enc bitrate=12000000 complexity=low"
+        h264 = f"openh264enc bitrate={int(12000000 * boost)} complexity=low"
     elif _has("mfh264enc"):
-        h264 = "mfh264enc bitrate=12000"  # Media Foundation (Windows), em kbit/s
+        h264 = f"mfh264enc bitrate={int(12000 * boost)}"  # Media Foundation (Windows), em kbit/s
     if h264 and _has("h264parse"):
         h264 += " ! h264parse"
 
@@ -43,9 +45,10 @@ def choose_format(preference="auto"):
         "vorbisenc" if _has("vorbisenc") else None)
 
     if _has("vp9enc"):
-        vpx = "vp9enc deadline=1 cpu-used=8 row-mt=true threads=4 target-bitrate=10000000 keyframe-max-dist=120"
+        vpx = (f"vp9enc deadline=1 cpu-used=8 row-mt=true threads=4 target-bitrate={int(10000000 * boost)} "
+               f"keyframe-max-dist={keyint}")
     elif _has("vp8enc"):
-        vpx = "vp8enc deadline=1 cpu-used=8 threads=4 target-bitrate=10000000 keyframe-max-dist=120"
+        vpx = f"vp8enc deadline=1 cpu-used=8 threads=4 target-bitrate={int(10000000 * boost)} keyframe-max-dist={keyint}"
     else:
         vpx = None
 
@@ -97,8 +100,9 @@ class Recorder:
         self._frame_watchdog = 0
         self.frames = 0  # atualizado na thread de streaming
 
-        ext, venc, mux, aenc = choose_format(options.get("video_format", "auto"))
-        logger.info("Formato: %s | vídeo: %s | áudio: %s", ext, venc.split("!")[1].split()[0],
+        fps = int(options.get("fps", 30))
+        ext, venc, mux, aenc = choose_format(options.get("video_format", "auto"), fps)
+        logger.info("Formato: %s a %d fps | vídeo: %s | áudio: %s", ext, fps, venc.split("!")[1].split()[0],
                     aenc.split()[0] if aenc else "nenhum encoder")
         folder = Path(options["video_dir"])
         folder.mkdir(parents=True, exist_ok=True)
@@ -107,12 +111,13 @@ class Recorder:
         self.extension = f".{ext}"
         self.path = folder / time.strftime(f"{TEMP_PREFIX}%Y-%m-%d_%H-%M-%S.part.{ext}")
 
-        fps = int(options.get("fps", 30))
+        # A fila descarta quadros se o encoder atrasar; ~250 ms de folga em taxas altas
+        queue_size = max(8, fps // 4)
         overlay_part = "videoconvert ! cairooverlay name=overlay ! " if overlay else ""
         location = str(self.path).replace("\\", "\\\\").replace('"', '\\"')
         parts = [
             f"{video_source} ! videocrop name=evencrop ! videorate ! video/x-raw,framerate={fps}/1 "
-            f"! {overlay_part}videoconvert ! queue max-size-buffers=8 leaky=downstream "
+            f"! {overlay_part}videoconvert ! queue max-size-buffers={queue_size} leaky=downstream "
             f"! {venc} ! queue ! mux.",
             f'{mux} name=mux ! filesink buffer-mode=unbuffered location="{location}"',
         ]
@@ -273,7 +278,9 @@ class Recorder:
         if self._finished:
             return
         self._finished = True
-        logger.info("Gravação encerrada: %d quadros da tela em %.1f s", self.frames, self.elapsed())
+        elapsed = self.elapsed()
+        logger.info("Gravação encerrada: %d quadros da tela em %.1f s (média de %.1f por segundo)",
+                    self.frames, elapsed, self.frames / elapsed if elapsed > 0 else 0)
         for attr in ("_stop_timeout", "_frame_watchdog"):
             if getattr(self, attr):
                 GLib.source_remove(getattr(self, attr))

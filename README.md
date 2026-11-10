@@ -12,15 +12,22 @@ Windows 10/11.
   numerado, desfocar e pixelar. A seleção continua ajustável pelas alças e pode ser movida
   (ferramenta Mover, `V`) sem perder as anotações. `Enter`/`Ctrl+C` copia e fecha, `Ctrl+S`
   salva, `Esc` cancela.
-- **Nome obrigatório**: todo print e todo vídeo pede um nome antes de salvar (cancelar o nome de um
-  vídeo pergunta se quer descartá-lo).
+- **Nome automático** (ligado por padrão): salva direto, sem perguntar, com um padrão personalizável
+  em Preferências. De fábrica: `Print-{contador}-{data}-{h}:{min}` e
+  `Recording-{contador}-{data}-{h}:{min}`. Campos: `{data}`, `{hora}`, `{ano}`, `{mes}`, `{dia}`,
+  `{h}`, `{min}`, `{seg}`, `{contador}` e, nos vídeos, `{duracao}`. No Windows o `:` vira `-`.
+- **Nome manual**: com o nome automático desligado, todo print e todo vídeo pede um nome antes de
+  salvar (cancelar o nome de um vídeo pergunta se quer descartá-lo).
+- **Preferências com busca** (`Ctrl+,`): opções em abas por tarefa (Prints, Gravação, Teclas e
+  cliques, Aplicativo) e um campo de busca que ignora acentos e entende sinônimos ("fps", "bandeja").
 - **Ícone na barra superior**: Capturar área, Gravar/Parar (com o tempo), Abrir janela,
   Preferências e Sair. KDE suporta nativamente; no GNOME requer a extensão AppIndicator
   (já ativa no Ubuntu; em Fedora/Arch instale `gnome-shell-extension-appindicator`).
 - **Segundo plano**: fechar a janela não encerra o app (atalhos respondem na hora); para
-  encerrar use **Sair** no menu (`Ctrl+Q`). Dá para desligar em Preferências → Geral.
+  encerrar use **Sair** no menu (`Ctrl+Q`). Dá para desligar em Preferências → Aplicativo.
 - **Gravação** (sempre da tela inteira): MP4 (H.264/AAC) ou WebM (VP9/Opus), microfone e áudio do sistema
   (ambos desligados por padrão), teclas e cliques desenhados no vídeo.
+  30, 60, 90 ou 120 quadros por segundo, sem nunca passar da taxa de atualização da tela gravada.
 
 ## Windows
 
@@ -33,7 +40,7 @@ administrador). O instalador ainda não é assinado: se o SmartScreen avisar, cl
   em qualquer programa, enquanto o app estiver aberto (inclusive só na bandeja).
 - **Bandeja**: o ícone fica sempre ativo; clique para abrir a janela e use o botão direito
   para o menu. As notificações aparecem como balões do ícone.
-- **Gravação**: escolha o monitor em Preferências → Vídeo → Tela a gravar. Teclas e cliques
+- **Gravação**: escolha o monitor em Preferências → Gravação → Tela a gravar. Teclas e cliques
   aparecem no vídeo sem nenhuma configuração extra.
 - **Iniciar com o Windows**: opção no instalador (abre direto na bandeja).
 - Logs em `%LOCALAPPDATA%\screen-toolbox\screen-toolbox.log`.
@@ -83,11 +90,23 @@ make logs           # acompanha o arquivo de log
 ### Teclas e cliques no vídeo
 
 No Wayland não existe API para ler teclas globalmente; o app lê `/dev/input` **somente durante
-a gravação**. Seu usuário precisa estar no grupo `input`:
+a gravação**. Seu usuário precisa estar no grupo `input`. O botão **Permitir** em
+Menu → Permissões (`Ctrl+H`) faz isso (pede a senha); ou, pelo terminal:
 
 ```sh
 sudo usermod -aG input $USER   # depois saia e entre na sessão
 ```
+
+### Permissões
+
+Na primeira execução o app abre a **configuração inicial**, e a mesma tela fica em
+Menu → Permissões (`Ctrl+H`) para conferir a situação depois:
+
+- **Captura de tela**: o sistema pergunta uma vez se o app pode tirar prints. Essa permissão não
+  aparece nas Configurações do GNOME (lá só entram apps Flatpak); se você negou, use
+  **Pedir de novo** nessa tela.
+- **Teclas e cliques no vídeo** (opcional): grupo `input`, como acima.
+- **Gravação de tela**: o sistema pergunta qual tela gravar a cada gravação, ou lembra a escolha.
 
 Limitações: cliques aparecem como etiqueta (“Mouse: esquerdo”), não como círculo no ponto
 (o kernel não informa a posição do cursor); toque no touchpad (tap-to-click) não é detectado.

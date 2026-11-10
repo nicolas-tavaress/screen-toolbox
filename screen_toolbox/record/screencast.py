@@ -23,6 +23,7 @@ class ScreenCastSession:
         self.fd = None
         self.node_id = None
         self.size = None
+        self.position = None
         self.restore_token = ""
         self.not_monitor = False
         self._closed_sub = 0
@@ -97,6 +98,7 @@ class ScreenCastSession:
                 return fail(2, {"error": "Nenhuma tela foi compartilhada."})
             self.node_id, props = streams[0]
             self.size = props.get("size")
+            self.position = props.get("position")  # canto do monitor, em coordenadas lógicas
             self.restore_token = results.get("restore_token", "")
             logger.info("Captura iniciada: %d stream(s), nó %s, tamanho %s, tipo de fonte %s",
                         len(streams), self.node_id, self.size, props.get("source_type"))

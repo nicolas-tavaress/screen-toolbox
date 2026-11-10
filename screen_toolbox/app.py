@@ -7,7 +7,7 @@ from pathlib import Path
 
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
-from . import APP_ID, APP_NAME, IS_WINDOWS, VERSION, log
+from . import APP_ID, APP_NAME, IS_WINDOWS, VERSION, log, naming
 from .capture.region import monitor_crop
 from .config import config
 from .editor.window import CaptureWindow
@@ -74,6 +74,7 @@ class ScreenToolboxApp(Adw.Application):
         self._clipboard_hold = None
         self._background_hold = False
         self.tray = None
+        self._permissions_dialog = None
         # para detectar reinstalação enquanto o app roda em segundo plano
         self._code_stamp = _code_stamp()
         self.restart_argv = None
@@ -102,6 +103,7 @@ class ScreenToolboxApp(Adw.Application):
             "screenshot": lambda *_: self.capture(),
             "record": lambda *_: self.toggle_recording(),
             "preferences": lambda *_: self.show_preferences(),
+            "permissions": lambda *_: self.show_permissions(),
             "about": lambda *_: self.show_about(),
             "quit": lambda *_: self.request_quit(),
         }
@@ -118,6 +120,8 @@ class ScreenToolboxApp(Adw.Application):
         self.set_accels_for_action("app.record", ["<Ctrl>2"])
         self.set_accels_for_action("app.preferences", ["<Ctrl>comma"])
         self.set_accels_for_action("app.quit", ["<Ctrl>q"])
+        if not IS_WINDOWS:  # a tela de permissões só existe no Linux
+            self.set_accels_for_action("app.permissions", ["<Ctrl>h"])
         self.set_background(config.get("run_in_background"))
         # no Windows o ícone fica sempre ativo: ele também registra os atalhos globais
         # e mostra as notificações
@@ -225,6 +229,10 @@ class ScreenToolboxApp(Adw.Application):
 
     def do_activate(self):
         self._ensure_main_window().present()
+        # primeira execução: configuração inicial das permissões (no Windows não há o que liberar)
+        if not IS_WINDOWS and not config.get("setup_done"):
+            config.set("setup_done", True)
+            self.show_permissions(first_run=True)
 
     # --- segundo plano ---------------------------------------------------
     def set_background(self, enabled):
@@ -371,8 +379,7 @@ class ScreenToolboxApp(Adw.Application):
             def on_permission_shot(surface, error):
                 if surface is None:
                     logger.error("Permissão de captura não concedida: %s", error or "cancelado")
-                    self.notify_user("Sem permissão para capturar a tela. Permita o Screen Toolbox em "
-                                     "Configurações → Apps → Screen Toolbox → Capturas de tela.")
+                    self.notify_user("Sem permissão para capturar a tela.", "Permissões", "app.permissions")
                     self.capturing = False
                     self.release()
                     return
@@ -502,6 +509,24 @@ class ScreenToolboxApp(Adw.Application):
         elif self.record_state == STARTING:
             self._cleanup_recording()
 
+    def _record_fps(self):
+        """Taxa de quadros da config, sem passar da taxa de atualização da tela gravada."""
+        from .record import framerate
+
+        display = Gdk.Display.get_default()
+        if IS_WINDOWS:
+            from .win32.screenshot import monitors
+
+            refresh = framerate.refresh_of_index(display, monitors(), self.cast.monitor_index)
+        else:
+            refresh = framerate.refresh_at(display, getattr(self.cast, "position", None))
+        wanted = int(config.get("fps"))
+        fps = framerate.clamp(wanted, refresh)
+        logger.info("Taxa de quadros: %d fps (pedido %d, tela a %.2f Hz)", fps, wanted, refresh)
+        if fps < wanted and refresh > 0:
+            self.notify_user(f"A tela é de {round(refresh)} Hz: gravando a {fps} fps em vez de {wanted}.")
+        return fps
+
     def _on_cast_ready(self, video_source, details):
         from .record.input_events import KeystrokeModel
         from .record.overlay import KeyOverlay
@@ -535,6 +560,7 @@ class ScreenToolboxApp(Adw.Application):
             logger.info("Exibição de teclas e cliques desligada")
 
         options = {k: config.get(k) for k in ("video_dir", "video_format", "fps", "record_mic", "record_system_audio")}
+        options["fps"] = self._record_fps()
         try:
             self.recorder = Recorder(video_source, options, overlay, self._on_record_finished)
             self.recorder.start()
@@ -563,6 +589,7 @@ class ScreenToolboxApp(Adw.Application):
         self.recorder.stop()
 
     def _on_record_finished(self, path, error):
+        duration = self.recorder.elapsed() if self.recorder is not None else 0
         self.recorder = None
         self._cleanup_recording()
         if error:
@@ -573,12 +600,30 @@ class ScreenToolboxApp(Adw.Application):
             logger.warning("Nenhum vídeo foi gerado em %s", path)
             self._present_main_window()
             return
-        logger.info("Gravação pronta (%.1f MB); pedindo o nome do arquivo", path.stat().st_size / 1e6)
+        logger.info("Gravação pronta (%.1f MB, %.1f s)", path.stat().st_size / 1e6, duration)
+        initial = ""
+        if config.get("video_auto_name"):
+            target = naming.auto_path("video", config.get("video_dir"), path.suffix, duration)
+            if self._save_video(path, target):
+                return
+            initial = target.stem  # não deu para renomear: pede o nome para não perder o vídeo
         self.hold()  # mantém o app vivo até o usuário nomear ou descartar
         self._pending_video = path
         self._set_record_state(NAMING)  # bloqueia nova gravação até nomear ou descartar
         self._update_record_ui()
-        self._ask_video_name(path)
+        self._ask_video_name(path, initial)
+
+    def _save_video(self, temp_path, target):
+        """Move o vídeo temporário para o nome final. Devolve False se não conseguir."""
+        try:
+            os.replace(temp_path, target)
+        except OSError as e:
+            logger.error("Não foi possível renomear %s para %s: %s", temp_path, target, e)
+            self.notify_user(f"Erro ao salvar o vídeo: {e.strerror}")
+            return False
+        logger.info("Vídeo salvo: %s", target)
+        self.notify_user(f"Vídeo salvo: {target.name}", "Abrir", "app.open-file", GLib.Variant("s", str(target)))
+        return True
 
     def _finish_naming(self):
         self._pending_video = None
@@ -613,15 +658,9 @@ class ScreenToolboxApp(Adw.Application):
             if target is None:
                 self._confirm_discard(temp_path)
                 return
-            try:
-                os.replace(temp_path, target)
-            except OSError as e:
-                logger.error("Não foi possível renomear %s para %s: %s", temp_path, target, e)
-                self.notify_user(f"Erro ao salvar o vídeo: {e.strerror}")
+            if not self._save_video(temp_path, target):
                 self._ask_video_name(temp_path, target.stem)
                 return
-            logger.info("Vídeo salvo: %s", target)
-            self.notify_user(f"Vídeo salvo: {target.name}", "Abrir", "app.open-file", GLib.Variant("s", str(target)))
             self._finish_naming()
 
         self._name_prompt = ask_filename(None, "Nome do vídeo", config.get("video_dir"), temp_path.suffix,
@@ -717,6 +756,21 @@ class ScreenToolboxApp(Adw.Application):
         from .preferences import PreferencesDialog
 
         PreferencesDialog(self).present(self._ensure_main_window())
+
+    def show_permissions(self, first_run=False):
+        from .permissions_dialog import PermissionsDialog
+
+        # o atalho (Ctrl+H) também chega na tela de captura e com a tela já aberta
+        if IS_WINDOWS or self.capturing or self._permissions_dialog is not None:
+            return
+        win = self._present_main_window()
+
+        def on_closed():
+            self._permissions_dialog = None
+            win.refresh_banner()
+
+        self._permissions_dialog = PermissionsDialog(first_run, on_closed=on_closed)
+        self._permissions_dialog.present(win)
 
     def show_about(self):
         about = Adw.AboutDialog(

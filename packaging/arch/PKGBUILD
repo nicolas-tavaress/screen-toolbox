@@ -11,7 +11,8 @@ depends=('python' 'python-gobject' 'python-cairo' 'gtk4' 'libadwaita'
          'xdg-desktop-portal')
 optdepends=('gst-plugins-ugly: gravação em MP4/H.264 (x264)'
             'gst-libav: áudio AAC no MP4'
-            'gst-plugins-bad: h264parse')
+            'gst-plugins-bad: h264parse'
+            'polkit: liberar teclas/cliques pela tela de permissões')
 makedepends=('make')
 # Para construir a partir deste repositório local: makepkg com SRCDEST apontando para o tarball
 source=("$pkgname-$pkgver.tar.gz")
